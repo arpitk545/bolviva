@@ -1,17 +1,14 @@
 "use client";
 
-// BolViva — single-page mock viva flow (mock mode).
+// BolViva — single-page mock viva flow.
 //
-// Flow: subject choose karo → sawal (voice me suno) → answer bolo/typo karo
-//       → score card + Hinglish feedback → 3 sawal ke baad full report.
+// Flow: choose a subject → question (listen in voice) → answer by voice or
+//       typing → score card + feedback → full report after 3 questions.
 //
-// Mock mode me:
-//  - Mic recording MediaRecorder se hoti hai aur blob browser me rehta hai.
-//    STT ke liye blob /api/stt par bheja jata hai — GNANI_API_KEY na ho toh
-//    route { mock: true } deta hai aur hum typed answer ko transcript mante
-//    hain (kuch invent nahi karte).
-//  - "Sawal suno" / "Sahi answer suno" browser speechSynthesis (hi-IN) se
-//    chalta hai. Real Gnani Timbre TTS /api/tts se plug hoga.
+// Voice pipeline: mic recording goes to /api/stt (Gnani Prisma STT) for the
+// transcript; questions, feedback and model answers are spoken via /api/tts
+// (Gnani Timbre TTS). Both routes fall back honestly to mock mode when
+// GNANI_API_KEY is not configured — nothing is ever invented.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -37,7 +34,7 @@ function speak(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
   const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = "hi-IN";
+  utter.lang = "en-IN";
   utter.rate = 0.98;
   window.speechSynthesis.speak(utter);
 }
@@ -139,7 +136,7 @@ export default function HomePage() {
     setMicError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      // Gnani STT webm nahi leta — ogg/mp4 pehle try karo.
+      // Gnani STT does not accept webm — prefer ogg/mp4.
       const mime = [
         "audio/ogg;codecs=opus",
         "audio/mp4",
@@ -167,7 +164,7 @@ export default function HomePage() {
       setRecording(true);
     } catch {
       setMicError(
-        "Mic permission nahi mila. Koi baat nahi — answer neeche type karke bhi viva de sakte ho."
+        "Mic permission was not granted. No problem — you can type your answer below and still take the viva."
       );
     }
   }
@@ -180,7 +177,7 @@ export default function HomePage() {
 
     let transcript = answerText.trim();
 
-    // Agar recording hai toh pehle STT route ko try karo (mock-safe).
+    // If a recording exists, try the STT route first (mock-safe).
     if (audioBlobRef.current) {
       try {
         const form = new FormData();
@@ -190,15 +187,15 @@ export default function HomePage() {
         if (!data.mock && typeof data.transcript === "string" && data.transcript.trim()) {
           transcript = data.transcript.trim();
           setSttNote(
-            "🎙️ Gnani Prisma STT ne tumhari awaaz transcribe kar di — usi par score hua hai."
+            "🎙️ Gnani Prisma STT transcribed your voice — this score is based on it."
           );
         } else {
           setSttNote(
-            "Recording transcribe nahi ho payi, isliye typed answer se score kiya gaya hai."
+            "Your recording could not be transcribed, so the typed answer was scored."
           );
         }
       } catch {
-        setSttNote("STT route se connect nahi hua — typed answer se score kiya gaya.");
+        setSttNote("Could not reach the STT service — the typed answer was scored.");
       }
     }
 
@@ -249,8 +246,9 @@ export default function HomePage() {
           Bol<span className="text-slate-900">Viva</span>
         </h1>
         <p className="mt-2 text-slate-600">
-          Bolke seekho, bina dare. 🎤 Hinglish me viva do — AI sunega, score dega,
-          aur sahi answer voice me sunayega.
+          Learn by speaking, without fear. 🎤 Give your viva in English or
+          Hinglish — the AI listens, scores you, and reads the model answer
+          aloud.
         </p>
         {gnaniLive ? (
           <span className="mt-3 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
@@ -258,7 +256,7 @@ export default function HomePage() {
           </span>
         ) : (
           <span className="mt-3 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-            Mock mode — Gnani API plug-in baki hai
+            Mock mode — Gnani API not plugged in yet
           </span>
         )}
       </header>
@@ -266,7 +264,7 @@ export default function HomePage() {
       {/* ---------- Stage: subject ---------- */}
       {stage === "subject" && (
         <section>
-          <h2 className="text-lg font-semibold">1. Subject choose karo 👇</h2>
+          <h2 className="text-lg font-semibold">1. Choose your subject 👇</h2>
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             {SUBJECTS.map((s) => (
               <button
@@ -277,13 +275,14 @@ export default function HomePage() {
                 <div className="text-2xl font-bold text-brand-600">{s}</div>
                 <div className="mt-1 font-medium">{SUBJECT_LABELS[s]}</div>
                 <div className="mt-1 text-sm text-slate-500">
-                  {getQuestionsBySubject(s).length} sawal • voice viva
+                  {getQuestionsBySubject(s).length} questions • voice viva
                 </div>
               </button>
             ))}
           </div>
           <p className="mt-6 text-center text-sm text-slate-500">
-            Kul {QUESTIONS.length} sawal ready hain. Ek viva = 3 sawal.
+            {QUESTIONS.length} questions are ready in total. One viva = 3
+            questions.
           </p>
         </section>
       )}
@@ -293,10 +292,10 @@ export default function HomePage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between text-sm text-slate-500">
             <span>
-              {subject} • Sawal {qIndex + 1} / {questions.length}
+              {subject} • Question {qIndex + 1} / {questions.length}
             </span>
             <button onClick={resetAll} className="text-brand-600 hover:underline">
-              Subject badlo
+              Change subject
             </button>
           </div>
           <div className="mt-3 h-2 rounded-full bg-slate-200">
@@ -311,14 +310,14 @@ export default function HomePage() {
             onClick={() => playTTS(current.question)}
             className="mt-3 rounded-full bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 ring-1 ring-brand-100 hover:bg-brand-100"
           >
-            🔊 Sawal suno
+            🔊 Listen to the question
           </button>
 
           <div className="mt-8">
-            <p className="font-semibold">Tumhara jawab 🎙️</p>
+            <p className="font-semibold">Your answer 🎙️</p>
             <p className="mt-1 text-sm text-slate-500">
-              Hinglish me bolo jaise viva me bolte — English terms English me,
-              samjhana Hindi me. 30–45 second ka jawab best rehta hai.
+              Speak the way you would in a real viva — English or Hinglish,
+              both work. A 30–45 second answer is ideal.
             </p>
 
             <div className="mt-3 flex items-center gap-3">
@@ -328,11 +327,11 @@ export default function HomePage() {
                   recording ? "bg-red-500 hover:bg-red-600" : "bg-slate-900 hover:bg-slate-700"
                 }`}
               >
-                {recording ? "⏹️ Recording roko" : "🎤 Bolke jawab do"}
+                {recording ? "⏹️ Stop recording" : "🎤 Answer by voice"}
               </button>
               {recording && (
                 <span className="animate-pulse text-sm font-medium text-red-500">
-                  Recording chal rahi hai… bolo!
+                  Recording… speak now!
                 </span>
               )}
               {audioUrl && !recording && (
@@ -341,16 +340,16 @@ export default function HomePage() {
             </div>
             {micError && <p className="mt-2 text-sm text-red-500">{micError}</p>}
             <p className="mt-2 text-xs text-slate-400">
-              Note: Gnani STT live ho to recording khud transcribe ho jati
-              hai. Warna apna jawab neeche likh do (jaise tum bolte, waisa
-              hi) — usi par score hoga.
+              Note: When Gnani STT is live, your recording is transcribed
+              automatically. Otherwise, write your answer below (just as you
+              would speak it) — that is what gets scored.
             </p>
 
             <textarea
               value={answerText}
               onChange={(e) => setAnswerText(e.target.value)}
               rows={5}
-              placeholder="Apna jawab yahan likho — Hinglish me hi likho, jaise bolte ho… jaise: 'Process ek program hai jo execution me hai, uski apni memory hoti hai…'"
+              placeholder="Write your answer here, just as you would speak it… e.g. 'A process is a program in execution; it has its own memory…'"
               className="mt-3 w-full rounded-xl border border-slate-300 p-3 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
             />
 
@@ -359,7 +358,7 @@ export default function HomePage() {
               disabled={submitting || (!answerText.trim() && !audioUrl)}
               className="mt-4 w-full rounded-xl bg-brand-600 py-3 font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {submitting ? "Score ho raha hai…" : "Jawab submit karo → Score dekho"}
+              {submitting ? "Scoring…" : "Submit answer → See your score"}
             </button>
           </div>
         </section>
@@ -400,20 +399,20 @@ export default function HomePage() {
                 onClick={() => playTTS(lastAttempt.result.feedback)}
                 className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-brand-700 ring-1 ring-brand-100 hover:bg-brand-100"
               >
-                🔊 Feedback suno
+                🔊 Listen to feedback
               </button>
               <button
                 onClick={hearModelAnswer}
                 className="rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
               >
-                ✅ Sahi answer suno
+                ✅ Hear the model answer
               </button>
             </div>
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <div className="rounded-xl bg-green-50 p-4">
-              <p className="font-semibold text-green-800">Kya sahi tha 👍</p>
+              <p className="font-semibold text-green-800">What you got right 👍</p>
               {lastAttempt.result.whatWasRight.length ? (
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-green-900">
                   {lastAttempt.result.whatWasRight.map((p, i) => (
@@ -422,12 +421,12 @@ export default function HomePage() {
                 </ul>
               ) : (
                 <p className="mt-2 text-sm text-green-900">
-                  Model points me se koi point pura cover nahi hua — neeche missed wala dekho.
+                  No model point was fully covered — see what was missed below.
                 </p>
               )}
             </div>
             <div className="rounded-xl bg-red-50 p-4">
-              <p className="font-semibold text-red-800">Kya miss hua 👇</p>
+              <p className="font-semibold text-red-800">What you missed 👇</p>
               {lastAttempt.result.whatWasMissed.length ? (
                 <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-red-900">
                   {lastAttempt.result.whatWasMissed.map((p, i) => (
@@ -436,7 +435,7 @@ export default function HomePage() {
                 </ul>
               ) : (
                 <p className="mt-2 text-sm text-red-900">
-                  Kuch miss nahi hua — saare points cover! 🎉
+                  Nothing missed — every point covered! 🎉
                 </p>
               )}
             </div>
@@ -446,7 +445,7 @@ export default function HomePage() {
             onClick={nextStep}
             className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-bold text-white hover:bg-slate-700"
           >
-            {qIndex + 1 < questions.length ? "Agla sawal →" : "Final report dekho 🏁"}
+            {qIndex + 1 < questions.length ? "Next question →" : "See the final report 🏁"}
           </button>
         </section>
       )}
@@ -461,10 +460,10 @@ export default function HomePage() {
           </p>
           <p className="mt-2 text-center text-slate-600">
             {reportTotal >= 75
-              ? "Solid! Viva-ready ho tum — bas aise hi bolte raho. 🔥"
+              ? "Solid! You are viva-ready — keep speaking exactly like this. 🔥"
               : reportTotal >= 50
-                ? "Achhi pakad hai. Miss hue points ek baar revise kar lo, score kud jayega."
-                : "Shuruaat ho gayi hai — missed points padho, kal phir try karo. Roz thoda, pakka sudhar."}
+                ? "Good grip. Revise the missed points once and your score will jump."
+                : "You have made a start — read the missed points and try again tomorrow. A little practice every day brings sure improvement."}
           </p>
 
           <div className="mt-6 space-y-3">
@@ -487,7 +486,7 @@ export default function HomePage() {
             onClick={resetAll}
             className="mt-6 w-full rounded-xl bg-brand-600 py-3 font-bold text-white hover:bg-brand-700"
           >
-            🔁 Phir se try karo
+            🔁 Try again
           </button>
           <p className="mt-4 text-center text-xs text-slate-400">
             BolViva — Built with Gnani AI (Prisma STT • Timbre TTS) • #GnaniAI

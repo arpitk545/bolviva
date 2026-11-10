@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
         text,
         model: "timbre-v2.5",
         voice: "Nalini",
-        language: "hi-IN",
+        language: "en-IN",
         speed: 1.0,
         audio_config: {
           sample_rate: 48000,

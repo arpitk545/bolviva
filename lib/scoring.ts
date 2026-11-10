@@ -18,7 +18,7 @@ export interface ScoreResult {
   confidence: number; // /10
   whatWasRight: string[];
   whatWasMissed: string[];
-  /** Hinglish feedback — pehle tareef, phir correction. */
+  /** English feedback — praise first, then the correction. */
   feedback: string;
   wordCount: number;
 }
@@ -93,7 +93,7 @@ export function scoreAnswer(transcript: string, question: Question): ScoreResult
       whatWasRight: [],
       whatWasMissed: [...question.modelAnswerPoints],
       feedback:
-        "Koi baat nahi, pehli baar me sab atak-te hain. Answer khali raha — kuch toh bolo, Hinglish me hi sahi. Ek line se shuru karo, phir points yaad aate jayenge.",
+        "No problem — everyone gets stuck the first time. The answer was empty, so just start speaking, in English or Hinglish. Begin with one line, and the points will come back to you.",
       wordCount: 0,
     };
   }
@@ -156,29 +156,29 @@ export function scoreAnswer(transcript: string, question: Question): ScoreResult
     coveredPoints.length > 0
       ? coveredPoints[0]
       : foundTerms.length > 0
-        ? `tumne "${foundTerms[0]}" wala concept sahi pakda`
-        : "tumne try pura kiya aur answer apne words me bola";
+        ? `you correctly caught the "${foundTerms[0]}" concept`
+        : "you attempted the full answer in your own words";
   const missSummary =
     missedPoints.length > 0
       ? missedPoints[0]
       : missedTerms.length > 0
-        ? `"${missedTerms[0]}" wala point add karna bhool gaye`
+        ? `you missed adding the "${missedTerms[0]}" point`
         : null;
 
   let opening: string;
-  if (total >= 80) opening = "Kya baat hai, zabardast answer!";
-  else if (total >= 60) opening = "Bahut badhiya, concept clear hai tumhara.";
-  else if (total >= 40) opening = "Achha try hai, base ban gaya hai.";
-  else opening = "Theek hai, shuruaat ho gayi hai — yahi se sudhar aata hai.";
+  if (total >= 80) opening = "Excellent — that was a strong answer!";
+  else if (total >= 60) opening = "Very good, your concept is clear.";
+  else if (total >= 40) opening = "Good try — the base is there.";
+  else opening = "Alright, this is a start — improvement begins here.";
 
-  let feedback = `${opening} Sahi baat ye rahi: ${rightSummary}.`;
+  let feedback = `${opening} What you got right: ${rightSummary}.`;
   if (missSummary) {
-    feedback += ` Ek cheez aur add karte toh marks pakke the: ${missSummary}.`;
+    feedback += ` One more thing would have secured the marks: ${missSummary}.`;
   } else {
-    feedback += " Lagbhag saare points cover ho gaye — bas aise hi bolte raho.";
+    feedback += " Almost all points are covered — keep speaking exactly like this.";
   }
   if (!hasExample && total < 90) {
-    feedback += " Agli baar ek chhota sa example (\"jaise...\") jod dena, examiner impress ho jata hai.";
+    feedback += " Next time, add a small example (\"for example...\") — examiners love that.";
   }
 
   return {
