@@ -3,16 +3,15 @@ import { NextRequest, NextResponse } from "next/server";
 // ---------------------------------------------------------------------------
 // POST /api/tts — JSON { text: string } → synthesized audio
 //
-// MOCK MODE: GNANI_API_KEY na ho toh { mock: true, ... } return hota hai aur
-// UI browser ki speechSynthesis se feedback sunati hai (page.tsx dekho).
-// Model answers ke TTS audio ko ek baar bana ke cache karne ka plan hai
-// (credits bachane ke liye) — woh integration ke time yahin aayega.
+// REAL MODE: GNANI_API_KEY set ho toh Gnani Timbre v2.5 ko call karke
+// audio ko data URL me return karte hain { mock: false, audioUrl }.
+// Key na ho ya API fail ho toh { mock: true } — UI browser speechSynthesis
+// par gir jati hai (page.tsx).
+// Docs: gnani-vachana SDK (api.vachana.ai), header X-API-Key-ID.
 // ---------------------------------------------------------------------------
 
-// TODO(Gnani): Official Timbre v2.5 TTS REST endpoint yahan dalna hai.
-// Endpoint URL invent NAHI kiya gaya hai — Gnani dashboard / API docs se
-// confirm karke GNANI_TTS_ENDPOINT env me set karna.
-const GNANI_TTS_ENDPOINT = process.env.GNANI_TTS_ENDPOINT ?? "";
+const GNANI_TTS_ENDPOINT =
+  process.env.GNANI_TTS_ENDPOINT ?? "https://api.vachana.ai/api/v1/tts/inference";
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GNANI_API_KEY;
@@ -28,32 +27,55 @@ export async function POST(req: NextRequest) {
 
   if (!apiKey) {
     return NextResponse.json(
-      {
-        mock: true,
-        message: "GNANI_API_KEY not configured",
-        audioUrl: null,
-        text,
-      },
+      { mock: true, message: "GNANI_API_KEY not configured", audioUrl: null, text },
       { status: 200 }
     );
   }
 
-  // TODO(Gnani TTS): Yahan real Timbre v2.5 TTS call aayegi:
-  //   1. fetch(GNANI_TTS_ENDPOINT, { method: "POST",
-  //        headers: { Authorization: `Bearer ${apiKey}`,
-  //                   "Content-Type": "application/json" },
-  //        body: JSON.stringify({ text, /* voice/language docs se */ }) })
-  //   2. Audio response ko ya toh direct stream karna, ya ek short-lived
-  //      URL bana ke { mock: false, audioUrl } return karna.
-  // Tab tak key hone par bhi honest mock response:
-  void GNANI_TTS_ENDPOINT;
-  return NextResponse.json(
-    {
-      mock: true,
-      message: "Gnani TTS integration pending — see TODO in app/api/tts/route.ts",
-      audioUrl: null,
-      text,
-    },
-    { status: 200 }
-  );
+  try {
+    const res = await fetch(GNANI_TTS_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "X-API-Key-ID": apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        model: "timbre-v2.5",
+        voice: "Nalini",
+        language: "hi-IN",
+        speed: 1.0,
+        audio_config: {
+          sample_rate: 48000,
+          encoding: "linear_pcm",
+          num_channels: 1,
+          sample_width: 2,
+          container: "mp3",
+          bitrate: "128k",
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return NextResponse.json(
+        {
+          mock: true,
+          message: `Gnani TTS error ${res.status}: ${errText.slice(0, 200)}`,
+          audioUrl: null,
+          text,
+        },
+        { status: 200 }
+      );
+    }
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    const audioUrl = `data:audio/mpeg;base64,${buf.toString("base64")}`;
+    return NextResponse.json({ mock: false, audioUrl, text }, { status: 200 });
+  } catch {
+    return NextResponse.json(
+      { mock: true, message: "Gnani TTS fetch failed", audioUrl: null, text },
+      { status: 200 }
+    );
+  }
 }

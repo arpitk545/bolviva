@@ -3,15 +3,28 @@ import { NextRequest, NextResponse } from "next/server";
 // ---------------------------------------------------------------------------
 // POST /api/stt — audio (FormData field: "audio") → transcript
 //
-// MOCK MODE: jab tak GNANI_API_KEY configure nahi hoti, ye route hamesha
-// { mock: true, ... } return karta hai aur UI typed-text fallback par chalti
-// hai. Koi fake transcript invent nahi kiya jata.
+// REAL MODE: GNANI_API_KEY set ho toh Gnani Prisma STT (POST /stt/v3,
+// multipart: audio_file + language_code + format) ko call karke asli
+// transcript return karte hain { mock: false, transcript }.
+// Key na ho, API fail ho, ya transcript khaali ho toh { mock: true } —
+// UI typed-text fallback par chalti hai. Koi fake transcript invent
+// nahi kiya jata.
+// Docs: gnani-vachana SDK (api.vachana.ai), header X-API-Key-ID.
+// Supported audio: wav, mp3, flac, ogg, m4a, aac (webm nahi — isliye
+// client ogg/mp4 me record karne ki koshish karta hai, page.tsx dekho).
 // ---------------------------------------------------------------------------
 
-// TODO(Gnani): Official Prisma v2.5 STT REST endpoint yahan dalna hai.
-// Endpoint URL invent NAHI kiya gaya hai — Gnani dashboard / API docs se
-// confirm karke GNANI_STT_ENDPOINT env me set karna, ya neeche ki constant me.
-const GNANI_STT_ENDPOINT = process.env.GNANI_STT_ENDPOINT ?? "";
+const GNANI_STT_ENDPOINT =
+  process.env.GNANI_STT_ENDPOINT ?? "https://api.vachana.ai/stt/v3";
+
+function extFromType(t: string): string {
+  if (t.includes("ogg")) return "ogg";
+  if (t.includes("mp4") || t.includes("m4a") || t.includes("aac")) return "m4a";
+  if (t.includes("mpeg") || t.includes("mp3")) return "mp3";
+  if (t.includes("wav")) return "wav";
+  if (t.includes("flac")) return "flac";
+  return "webm"; // Gnani support nahi karta — error par UI typed fallback legi
+}
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GNANI_API_KEY;
@@ -28,33 +41,78 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Form parse karke rakh liya hai taaki real integration seedha plug ho.
   const form = await req.formData().catch(() => null);
   const audio = form?.get("audio");
-  if (!audio) {
+  if (!audio || typeof audio === "string") {
     return NextResponse.json(
       { mock: true, message: "No audio field in request", transcript: "" },
       { status: 400 }
     );
   }
 
-  // TODO(Gnani STT): Yahan real Prisma v2.5 STT call aayegi:
-  //   1. `audio` Blob ko Gnani ke required format me bhejna
-  //      (format/sample-rate docs se confirm karna — webm ko conversion
-  //      chahiye ho toh server-side ffmpeg step yahin lagega).
-  //   2. fetch(GNANI_STT_ENDPOINT, { method: "POST",
-  //        headers: { Authorization: `Bearer ${apiKey}`, ... }, body })
-  //   3. Response se transcript nikalke return karna:
-  //      { mock: false, transcript, language: "hi-en" }
-  // Tab tak key hone par bhi honest mock response:
-  void GNANI_STT_ENDPOINT;
-  return NextResponse.json(
-    {
-      mock: true,
-      message: "Gnani STT integration pending — see TODO in app/api/stt/route.ts",
-      transcript: "",
-      language: "hi-en",
-    },
-    { status: 200 }
-  );
+  const blob = audio as Blob;
+  const ext = extFromType(blob.type || "");
+
+  try {
+    const fd = new FormData();
+    fd.append("audio_file", blob, `answer.${ext}`);
+    fd.append("language_code", "hi-IN");
+    fd.append("format", "verbatim");
+
+    const res = await fetch(GNANI_STT_ENDPOINT, {
+      method: "POST",
+      headers: { "X-API-Key-ID": apiKey },
+      body: fd,
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      return NextResponse.json(
+        {
+          mock: true,
+          message: `Gnani STT error ${res.status}: ${errText.slice(0, 200)}`,
+          transcript: "",
+          language: "hi-en",
+        },
+        { status: 200 }
+      );
+    }
+
+    const data: any = await res.json().catch(() => null);
+    const transcript: string = (
+      data?.transcript ??
+      data?.text ??
+      data?.result?.transcript ??
+      ""
+    )
+      .toString()
+      .trim();
+
+    if (!transcript) {
+      return NextResponse.json(
+        {
+          mock: true,
+          message: "Gnani STT returned empty transcript",
+          transcript: "",
+          language: "hi-en",
+        },
+        { status: 200 }
+      );
+    }
+
+    return NextResponse.json(
+      { mock: false, transcript, language: "hi-en" },
+      { status: 200 }
+    );
+  } catch {
+    return NextResponse.json(
+      {
+        mock: true,
+        message: "Gnani STT fetch failed",
+        transcript: "",
+        language: "hi-en",
+      },
+      { status: 200 }
+    );
+  }
 }

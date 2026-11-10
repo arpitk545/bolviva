@@ -13,7 +13,7 @@
 //  - "Sawal suno" / "Sahi answer suno" browser speechSynthesis (hi-IN) se
 //    chalta hai. Real Gnani Timbre TTS /api/tts se plug hoga.
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   QUESTIONS,
   SUBJECTS,
@@ -40,6 +40,28 @@ function speak(text: string) {
   utter.lang = "hi-IN";
   utter.rate = 0.98;
   window.speechSynthesis.speak(utter);
+}
+
+/**
+ * Text ko Gnani Timbre TTS (/api/tts) se suno; mock mode ya failure par
+ * browser voice fallback. Real mode me route data-URL audio deta hai.
+ */
+async function playTTS(text: string) {
+  try {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (!data.mock && data.audioUrl) {
+      await new Audio(data.audioUrl).play();
+      return;
+    }
+  } catch {
+    /* fallback neeche hai */
+  }
+  speak(text);
 }
 
 function ScoreBar({ label, value, max }: { label: string; value: number; max: number }) {
@@ -79,6 +101,16 @@ export default function HomePage() {
   const chunksRef = useRef<Blob[]>([]);
   const audioBlobRef = useRef<Blob | null>(null);
 
+  const [gnaniLive, setGnaniLive] = useState(false);
+
+  // Header badge ke liye: Gnani key configured hai ya nahi?
+  useEffect(() => {
+    fetch("/api/status")
+      .then((r) => r.json())
+      .then((d) => setGnaniLive(Boolean(d?.gnani)))
+      .catch(() => setGnaniLive(false));
+  }, []);
+
   const questions = useMemo(
     () => (subject ? getQuestionsBySubject(subject) : []),
     [subject]
@@ -107,7 +139,19 @@ export default function HomePage() {
     setMicError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      // Gnani STT webm nahi leta — ogg/mp4 pehle try karo.
+      const mime = [
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        "audio/webm;codecs=opus",
+      ].find(
+        (t) =>
+          typeof MediaRecorder !== "undefined" &&
+          MediaRecorder.isTypeSupported(t)
+      );
+      const recorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
       chunksRef.current = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -145,9 +189,12 @@ export default function HomePage() {
         const data = await res.json();
         if (!data.mock && typeof data.transcript === "string" && data.transcript.trim()) {
           transcript = data.transcript.trim();
+          setSttNote(
+            "🎙️ Gnani Prisma STT ne tumhari awaaz transcribe kar di — usi par score hua hai."
+          );
         } else {
           setSttNote(
-            "Mock mode: Gnani STT abhi configured nahi hai, isliye recording ki jagah typed answer se score kiya gaya hai."
+            "Recording transcribe nahi ho payi, isliye typed answer se score kiya gaya hai."
           );
         }
       } catch {
@@ -184,25 +231,10 @@ export default function HomePage() {
     audioBlobRef.current = null;
   }
 
-  // "Sahi answer suno" — pehle /api/tts try karo, mock ho toh speechSynthesis.
+  // "Sahi answer suno" — Gnani Timbre TTS, mock ho toh browser voice.
   async function hearModelAnswer() {
     if (!lastAttempt) return;
-    const text = modelAnswerText(lastAttempt.question);
-    try {
-      const res = await fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json();
-      if (!data.mock && data.audioUrl) {
-        new Audio(data.audioUrl).play();
-        return;
-      }
-    } catch {
-      /* mock fallback neeche hai */
-    }
-    speak(text);
+    await playTTS(modelAnswerText(lastAttempt.question));
   }
 
   const reportTotal = attempts.length
@@ -220,9 +252,15 @@ export default function HomePage() {
           Bolke seekho, bina dare. 🎤 Hinglish me viva do — AI sunega, score dega,
           aur sahi answer voice me sunayega.
         </p>
-        <span className="mt-3 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
-          Mock mode — Gnani API plug-in baki hai
-        </span>
+        {gnaniLive ? (
+          <span className="mt-3 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+            Live — Gnani Prisma STT • Timbre TTS
+          </span>
+        ) : (
+          <span className="mt-3 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+            Mock mode — Gnani API plug-in baki hai
+          </span>
+        )}
       </header>
 
       {/* ---------- Stage: subject ---------- */}
@@ -270,7 +308,7 @@ export default function HomePage() {
 
           <h2 className="mt-6 text-2xl font-bold leading-snug">{current.question}</h2>
           <button
-            onClick={() => speak(current.question)}
+            onClick={() => playTTS(current.question)}
             className="mt-3 rounded-full bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 ring-1 ring-brand-100 hover:bg-brand-100"
           >
             🔊 Sawal suno
@@ -303,9 +341,9 @@ export default function HomePage() {
             </div>
             {micError && <p className="mt-2 text-sm text-red-500">{micError}</p>}
             <p className="mt-2 text-xs text-slate-400">
-              Note: Mock mode me recording sirf save hoti hai — Gnani STT plug-in
-              ke baad yahi audio auto-transcribe hoga. Abhi ke liye apna jawab
-              neeche likh do (jaise tum bolte, waisa hi).
+              Note: Gnani STT live ho to recording khud transcribe ho jati
+              hai. Warna apna jawab neeche likh do (jaise tum bolte, waisa
+              hi) — usi par score hoga.
             </p>
 
             <textarea
@@ -359,7 +397,7 @@ export default function HomePage() {
             <p className="mt-1 leading-relaxed">{lastAttempt.result.feedback}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
-                onClick={() => speak(lastAttempt.result.feedback)}
+                onClick={() => playTTS(lastAttempt.result.feedback)}
                 className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-brand-700 ring-1 ring-brand-100 hover:bg-brand-100"
               >
                 🔊 Feedback suno
