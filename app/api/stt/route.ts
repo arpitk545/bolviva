@@ -56,8 +56,12 @@ export async function POST(req: NextRequest) {
   try {
     const fd = new FormData();
     fd.append("audio_file", blob, `answer.${ext}`);
-    fd.append("language_code", "hi-IN");
-    fd.append("format", "verbatim");
+    // Prisma v3.0 codemix: English words stay in Latin script, Hindi in
+    // Devanagari — scoring ke key terms (Latin) match ho pate hain aur
+    // English/Hinglish dono answers pehle se behtar transcribe hote hain.
+    fd.append("model", "prisma-v3.0");
+    fd.append("language_code", "indic-auto");
+    fd.append("format", "codemix");
 
     const res = await fetch(GNANI_STT_ENDPOINT, {
       method: "POST",
