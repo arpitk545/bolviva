@@ -250,11 +250,7 @@ export default function HomePage() {
           Hinglish — the AI listens, scores you, and reads the model answer
           aloud.
         </p>
-        {gnaniLive ? (
-          <span className="mt-3 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
-            Live — Gnani Prisma STT • Timbre TTS
-          </span>
-        ) : (
+        {!gnaniLive && (
           <span className="mt-3 inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
             Mock mode — Gnani API not plugged in yet
           </span>
