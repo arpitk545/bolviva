@@ -18,7 +18,7 @@ Target categories: Best Hinglish code-mixed voice experience • Best Tier-2/3 t
 ## Tech
 
 - **Next.js 14 (App Router) + React 18 + Tailwind CSS 3 + TypeScript**
-- Question bank: `lib/questions.ts` (12 sawal, model answers + key terms)
+- Question bank: `lib/questions.ts` (40 questions, model answers + key terms)
 - Scoring engine: `lib/scoring.ts` (pure logic, koi API nahi chahiye)
 - Gnani models (integration points ready):
   - **Prisma v2.5 STT** — Hinglish speech → text → `app/api/stt/route.ts`
@@ -72,6 +72,6 @@ app/
   api/stt/route.ts  — Prisma STT plug-in point (mock-safe)
   api/tts/route.ts  — Timbre TTS plug-in point (mock-safe)
 lib/
-  questions.ts      — 12-question bank + model answers + key terms
+  questions.ts      — 40-question bank + model answers + key terms
   scoring.ts        — rubric-based scoring engine + Hinglish feedback
 ```
