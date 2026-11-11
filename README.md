@@ -1,77 +1,93 @@
-# BolViva — Hinglish Voice Mock Viva 🎤
+# BolViva — Voice Mock Viva, powered by Gnani AI 🎤
 
-**Bolke seekho, bina dare.**
+**Practice speaking your answers before the real viva does it for you.**
 
-Tier-2/3 ke students ko concepts aate hain, lekin viva/interview me English me bolne me woh atak jaate hain. BolViva me student apna jawab **Hinglish me bolta** hai — app usko samajhta hai, model answer se compare karke **score** deta hai, aur sahi answer **Hinglish voice me sunata** hai.
+Students in tier-2/3 towns usually *know* their concepts — they freeze when they
+have to say them out loud in English. BolViva is a voice-first mock viva: the
+app asks a question out loud, the student answers by speaking (English or
+Hinglish), Gnani's speech models listen, and the student gets a scored report
+with spoken feedback — just like a real examiner, minus the fear.
 
-Entry for **Gnani AI — Great Indian AI Internship Challenge** (deadline 10 Nov 2026).
-Target categories: Best Hinglish code-mixed voice experience • Best Tier-2/3 town entry • Best 60-sec demo video.
+Entry for **Gnani AI — Great Indian AI Internship Challenge**
+(deadline extended to 15 Nov 2026).
+Target categories: Best Hinglish code-mixed voice experience • Best Tier-2/3
+town entry • Best demo video.
 
-## Flow
+**Live app:** https://bolviva.vercel.app
 
-1. Subject choose karo — **OS / DBMS / Computer Networks / DSA** (3 sawal each)
-2. App sawal sunata hai (voice)
-3. Student bolke (mic) ya type karke Hinglish me jawab deta hai
-4. Score card: **Concept 40 + Completeness 30 + Example/Clarity 20 + Confidence 10 = 100**, kya sahi tha / kya miss hua, aur Hinglish feedback
-5. Teen sawal ke baad full viva report
+## The voice loop — Gnani end to end
+
+Every spoken moment in BolViva runs on Gnani's Vachana platform
+(`api.vachana.ai`, single `GNANI_API_KEY`, header `X-API-Key-ID`):
+
+| Step | What happens | Gnani model |
+|---|---|---|
+| 1 | The question is read aloud to the student | **Timbre v2.5 TTS** (voice: Nalini, en-IN) |
+| 2 | The student answers by speaking into the mic | — |
+| 3 | The spoken answer is transcribed (code-mixed English stays in Latin script, so scoring matches cleanly) | **Prisma v3.0 STT** (`indic-auto`, `codemix`) |
+| 4 | The answer is scored and feedback is generated | BolViva scoring engine (below) |
+| 5 | Feedback, the model answer, and the final report summary are spoken back | **Timbre v2.5 TTS** |
+
+Subjects: **Operating Systems / DBMS / Computer Networks / DSA** —
+3 questions per viva, 40-question bank.
+
+## Scoring — an examiner's answer key, matched fairly
+
+A real examiner grades against a fixed answer key; BolViva does the same.
+The 40-question bank (`lib/questions.ts`) carries model-answer points and key
+concepts per question, and `lib/scoring.ts` grades the Prisma transcript
+against them on the challenge rubric:
+
+- **Concept accuracy — 40** · **Completeness — 30** · **Example/Clarity — 20** · **Confidence — 10**
+
+Matching is deliberately *not* naive string search, because students answer
+in their own words and STT is not perfect:
+
+1. **Morphological word forms** — "processes / executing / sharing" count for
+   "process / execution / share".
+2. **Fuzzy near-match** (edit distance) for longer words — small STT
+   mis-hearings or spelling variants still earn the point.
+3. **Phrase fallback** — a multi-word key concept counts when ≥70% of its
+   content words are present, in English or Hinglish variants.
+
+Verified effect: a correct paraphrased answer scores **84/100** (vs 71 with
+plain exact matching), an STT-noised transcript **82** (vs 63) — while a weak
+answer still scores 25 and an off-topic one 7. No free marks.
+
+## Honest fallback (no fake "live")
+
+If the Gnani key is missing or an API call fails, the API routes return
+`{ "mock": true }`, the UI shows a clear mock-mode warning and falls back to
+the browser's built-in voice, and typed answers remain available. BolViva
+never presents mock output as Gnani output.
 
 ## Tech
 
 - **Next.js 14 (App Router) + React 18 + Tailwind CSS 3 + TypeScript**
-- Question bank: `lib/questions.ts` (40 questions, model answers + key terms)
-- Scoring engine: `lib/scoring.ts` (pure logic, koi API nahi chahiye)
-- Gnani models (integration points ready):
-  - **Prisma v2.5 STT** — Hinglish speech → text → `app/api/stt/route.ts`
-  - **Timbre v2.5 TTS** — sawal/feedback ki voice → `app/api/tts/route.ts`
+- `app/api/tts/route.ts` — Timbre v2.5 synthesis (`/api/v1/tts/inference`)
+- `app/api/stt/route.ts` — Prisma v3.0 transcription (`/stt/v3`)
+- `app/api/status/route.ts` — reports only whether the key is live (boolean; the key itself is never exposed)
+- `lib/questions.ts` — 40 questions with model answers + key terms
+- `lib/scoring.ts` — rubric scoring engine (pure logic, no extra API needed)
 
 ## Setup
 
 ```bash
-# 1. Dependencies install karo (ek baar)
 npm install
-
-# 2. Env file banao
-cp .env.example .env.local
-# .env.local me GNANI_API_KEY dalna hai — jab Gnani access mil jaye.
-# Key kabhi chat / git / public jagah mat dalna.
-
-# 3. Dev server
-npm run dev
-# http://localhost:3000
+cp .env.example .env.local   # set GNANI_API_KEY (never commit or share the key)
+npm run dev                  # http://localhost:3000
 ```
-
-## Mock mode (bina API key ke)
-
-App bina Gnani key ke **pura chalta hai** taaki build/demo kabhi ruke nahi:
-
-| Feature | Mock mode me | Real mode me (key ke baad) |
-|---|---|---|
-| Sawal sunna | Browser `speechSynthesis` (hi-IN) | Gnani Timbre TTS (`/api/tts`) |
-| Jawab bolna | MediaRecorder se recording save hoti hai, playback milta hai | Wahi audio `/api/stt` → Prisma STT → auto transcript |
-| Jawab ka transcript | Student type karta hai (textarea) | STT transcript auto-fill |
-| Scoring + feedback | `lib/scoring.ts` — pura real logic | Same (koi change nahi) |
-| "Sahi answer suno" | Browser `speechSynthesis` | `/api/tts` se Timbre audio |
-
-`/api/stt` aur `/api/tts` dono routes key na hone par saaf JSON return karte hain:
-`{ "mock": true, "message": "GNANI_API_KEY not configured" }` — koi fake data invent nahi hota.
-
-## Gnani API plug-in checklist (access milte hi)
-
-1. `.env.local` me `GNANI_API_KEY` set karo
-2. Gnani docs/dashboard se official **Prisma STT** endpoint confirm karke `GNANI_STT_ENDPOINT` set karo, phir `app/api/stt/route.ts` ke `TODO(Gnani STT)` block me real fetch call likho (audio format/sample-rate docs ke hisaab se)
-3. Same **Timbre TTS** ke liye: `GNANI_TTS_ENDPOINT` + `app/api/tts/route.ts` ka `TODO(Gnani TTS)` block
-4. Credits bachane ke liye: model answers ke TTS audio ek baar bana ke cache karo
-5. Demo se pehle 4–5 asli Hinglish answers par STT accuracy test karo
 
 ## Project structure
 
 ```
 app/
-  page.tsx          — pura viva flow (subject → sawal → score → report)
+  page.tsx          — full viva flow (subject → question → score → report)
   layout.tsx, globals.css
-  api/stt/route.ts  — Prisma STT plug-in point (mock-safe)
-  api/tts/route.ts  — Timbre TTS plug-in point (mock-safe)
+  api/stt/route.ts  — Gnani Prisma v3.0 STT (mock-safe fallback)
+  api/tts/route.ts  — Gnani Timbre v2.5 TTS (mock-safe fallback)
+  api/status/route.ts
 lib/
   questions.ts      — 40-question bank + model answers + key terms
-  scoring.ts        — rubric-based scoring engine + Hinglish feedback
+  scoring.ts        — rubric-based scoring engine + feedback
 ```

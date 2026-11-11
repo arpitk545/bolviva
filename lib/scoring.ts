@@ -5,6 +5,16 @@
 //   Example / clarity: 20  (example diya? answer structured tha?)
 //   Confidence       : 10  (answer ki length + filler words ka heuristic)
 //
+// Matching is NOT naive exact-string search. The student's spoken answer
+// (Gnani Prisma transcript) is matched against the answer key with:
+//   1. Morphological word forms — "processes / executing / sharing" count
+//      for "process / execution / share".
+//   2. Fuzzy near-match (edit distance) for longer words — small STT
+//      mis-hearings or spelling variants still earn the point.
+//   3. Phrase fallback — a multi-word key term counts when >=70% of its
+//      content words are present, so paraphrases in the student's own
+//      words (English or Hinglish) score fairly.
+//
 // Output: total + per-section scores + kya sahi tha + kya miss hua +
 // Hinglish feedback (hamesha pehle positive, phir correction).
 
@@ -44,12 +54,122 @@ function contentWords(text: string): string[] {
     .filter((w) => w.length > 2 && !STOPWORDS.has(w));
 }
 
+/**
+ * Ek word ke morphological forms: "processes" -> {processes, process},
+ * "executing" -> {executing, execut, execute}, "sharing" -> {sharing, shar,
+ * share}, "studies" -> {studies, study}. Do words "same" mane jate hain agar
+ * unke form-sets intersect karein — isse student ke apne shabdon wala jawab
+ * bhi answer key se match ho jata hai.
+ */
+function wordForms(word: string): Set<string> {
+  const forms = new Set<string>([word]);
+  const add = (s: string) => {
+    if (s.length >= 3) forms.add(s);
+  };
+  if (word.endsWith("ies") && word.length > 4) add(word.slice(0, -3) + "y");
+  if (word.endsWith("es") && word.length > 3) add(word.slice(0, -2));
+  if (word.endsWith("s") && word.length > 3) add(word.slice(0, -1));
+  if (word.endsWith("ing") && word.length > 5) {
+    const base = word.slice(0, -3);
+    add(base);
+    add(base + "e");
+    // double-letter stem: "running" -> "run"
+    if (base.length > 2 && base[base.length - 1] === base[base.length - 2]) {
+      add(base.slice(0, -1));
+    }
+  }
+  if (word.endsWith("ed") && word.length > 4) {
+    const base = word.slice(0, -2);
+    add(base);
+    add(base + "e");
+    if (base.length > 2 && base[base.length - 1] === base[base.length - 2]) {
+      add(base.slice(0, -1));
+    }
+  }
+  if (word.endsWith("ly") && word.length > 4) add(word.slice(0, -2));
+  return forms;
+}
+
+/** Classic Levenshtein edit distance (do rows, chhote words par hi chalta hai). */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (Math.abs(m - n) > 2) return 3; // threshold se bahar — early exit
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,
+        cur[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/** Transcript ka precomputed index — tokens + unke saare word forms. */
+interface TranscriptIndex {
+  normalized: string;
+  tokens: string[];
+  formSet: Set<string>;
+}
+
+function buildIndex(normalized: string): TranscriptIndex {
+  const tokens = normalized.split(" ").filter(Boolean);
+  const formSet = new Set<string>();
+  for (const t of tokens) {
+    for (const f of wordForms(t)) formSet.add(f);
+  }
+  return { normalized, tokens, formSet };
+}
+
+/**
+ * Ek content word transcript me "mila" mana jata hai agar:
+ *  - uska koi morphological form transcript ke kisi word ke form se mile, ya
+ *  - lamba word (>=6 chars) ho aur transcript ke kisi word se edit distance
+ *    chhota ho (STT ki halki galti / spelling variant maaf).
+ */
+function tokenMatches(word: string, idx: TranscriptIndex): boolean {
+  for (const f of wordForms(word)) {
+    if (idx.formSet.has(f)) return true;
+  }
+  if (word.length >= 6) {
+    const maxDist = word.length <= 7 ? 1 : 2;
+    for (const t of idx.tokens) {
+      if (
+        Math.abs(t.length - word.length) <= maxDist &&
+        editDistance(word, t) <= maxDist
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** keyTerm entry "variant1|variant2|..." — koi bhi variant transcript me mile toh match. */
-function keyTermFound(entry: string, normalizedTranscript: string): boolean {
+function keyTermFound(entry: string, idx: TranscriptIndex): boolean {
   return entry
     .split("|")
     .map((v) => normalize(v))
-    .some((v) => v.length > 0 && normalizedTranscript.includes(v));
+    .some((v) => {
+      if (v.length === 0) return false;
+      // Phrase as-is mil jaye toh pakka match.
+      if (idx.normalized.includes(v)) return true;
+      // Warna content words se match: single word -> token match;
+      // multi-word phrase -> >=70% content words present hon.
+      const words = v
+        .split(" ")
+        .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+      if (words.length === 0) return false;
+      if (words.length === 1) return tokenMatches(words[0], idx);
+      const hit = words.filter((w) => tokenMatches(w, idx)).length;
+      return hit / words.length >= 0.7;
+    });
 }
 
 function keyTermLabel(entry: string): string {
@@ -57,11 +177,11 @@ function keyTermLabel(entry: string): string {
 }
 
 /** Ek model point "cover" hua mana jata hai agar uske >=40% content words
- *  transcript me milen (ya point ka koi 3+ word phrase as-is mil jaye). */
-function pointCovered(point: string, normalizedTranscript: string): boolean {
+ *  transcript me milen (morphological/fuzzy matching ke saath). */
+function pointCovered(point: string, idx: TranscriptIndex): boolean {
   const words = contentWords(point);
   if (words.length === 0) return false;
-  const found = words.filter((w) => normalizedTranscript.includes(w)).length;
+  const found = words.filter((w) => tokenMatches(w, idx)).length;
   return found / words.length >= 0.4;
 }
 
@@ -81,6 +201,7 @@ export function scoreAnswer(transcript: string, question: Question): ScoreResult
   const normalized = normalize(transcript);
   const words = normalized.length ? normalized.split(" ").filter(Boolean) : [];
   const wordCount = words.length;
+  const idx = buildIndex(normalized);
 
   // ---------- Khali answer ----------
   if (wordCount === 0) {
@@ -102,7 +223,7 @@ export function scoreAnswer(transcript: string, question: Question): ScoreResult
   const foundTerms: string[] = [];
   const missedTerms: string[] = [];
   for (const entry of question.keyTerms) {
-    if (keyTermFound(entry, normalized)) foundTerms.push(keyTermLabel(entry));
+    if (keyTermFound(entry, idx)) foundTerms.push(keyTermLabel(entry));
     else missedTerms.push(keyTermLabel(entry));
   }
   const concept =
@@ -114,7 +235,7 @@ export function scoreAnswer(transcript: string, question: Question): ScoreResult
   const coveredPoints: string[] = [];
   const missedPoints: string[] = [];
   for (const point of question.modelAnswerPoints) {
-    if (pointCovered(point, normalized)) coveredPoints.push(point);
+    if (pointCovered(point, idx)) coveredPoints.push(point);
     else missedPoints.push(point);
   }
   const completeness =

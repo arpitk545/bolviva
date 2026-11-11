@@ -479,8 +479,25 @@ export default function HomePage() {
           </div>
 
           <button
+            onClick={() =>
+              playTTS(
+                `Your viva report is ready. You scored ${reportTotal} out of 100. ${
+                  reportTotal >= 75
+                    ? "Solid work. You are viva-ready. Keep speaking exactly like this."
+                    : reportTotal >= 50
+                      ? "Good grip. Revise the missed points once and your score will jump."
+                      : "You have made a start. Read the missed points and try again tomorrow. A little practice every day brings sure improvement."
+                }`
+              )
+            }
+            className="mt-6 w-full rounded-xl bg-slate-900 py-3 font-bold text-white hover:bg-slate-700"
+          >
+            🔊 Listen to your report
+          </button>
+
+          <button
             onClick={resetAll}
-            className="mt-6 w-full rounded-xl bg-brand-600 py-3 font-bold text-white hover:bg-brand-700"
+            className="mt-3 w-full rounded-xl bg-brand-600 py-3 font-bold text-white hover:bg-brand-700"
           >
             🔁 Try again
           </button>
